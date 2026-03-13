@@ -127,7 +127,9 @@ gQIDAQAB
         response = await self.session.post(
             api_url, data=data, follow_redirects=False
         )
-        response.raise_for_status()
+        # 不对 3xx 重定向调用 raise_for_status()
+        if response.status_code >= 400:
+            response.raise_for_status()
 
         # 检查是否需要二次验证
         if response.status_code in (301, 302, 303, 307, 308):
