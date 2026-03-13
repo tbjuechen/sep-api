@@ -18,4 +18,4 @@ dependencies:
     - lxml
     - numpy
     - pytesseract
-    - antiy-cap
+    # - antiy-cap  # 需要单独安装

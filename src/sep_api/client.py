@@ -15,6 +15,21 @@ from lxml import etree
 from .captcha import CaptchaHandler
 
 
+class SEPAuthError(Exception):
+    """认证错误"""
+    pass
+
+
+class SEPTwoFactorAuthError(SEPAuthError):
+    """二次验证错误，需要邮箱或手机验证码"""
+    def __init__(self, email: str, phone: str, user_id: str, user_name: str):
+        self.email = email
+        self.phone = phone
+        self.user_id = user_id
+        self.user_name = user_name
+        super().__init__(f"需要二次验证 - 邮箱: {email}, 手机: {phone}")
+
+
 class SEPClient:
     """国科大教务系统客户端"""
 
@@ -40,10 +55,12 @@ class SEPClient:
         )
         self.captcha_handler = CaptchaHandler()
         self._captcha_result: Optional[str] = None
+        self._two_factor_data: Optional[dict] = None
         self.name: Optional[str] = None
         self.student_id: Optional[str] = None
         self.unit: Optional[str] = None
         self.courses: list = []
+        self._is_logged_in = False
 
     async def initialize(self) -> None:
         """初始化会话，访问首页"""
@@ -88,9 +105,11 @@ gQIDAQAB
         return base64.b64encode(encrypted).decode()
 
     async def login(
-        self, username: str, password: str, captcha: Optional[str] = None
+        self, username: str, password: str, captcha: Optional[str] = None,
+        email_code: Optional[str] = None, phone_code: Optional[str] = None,
+        trust_device: bool = True
     ) -> str:
-        """登录"""
+        """登录（支持二次验证）"""
         if not captcha:
             captcha = self._captcha_result
 
@@ -106,30 +125,185 @@ gQIDAQAB
         }
 
         response = await self.session.post(
-            api_url, data=data, follow_redirects=True
+            api_url, data=data, follow_redirects=False
         )
         response.raise_for_status()
+
+        # 检查是否需要二次验证
+        if response.status_code in (301, 302, 303, 307, 308):
+            location = response.headers.get("Location", "")
+            if "userVisit" in location:
+                # 需要二次验证
+                await self.session.get(f"https://sep.ucas.ac.cn{location}")
+                self._parse_two_factor(response.text)
+                logger.info(f"需要二次验证 - 邮箱: {self._two_factor_data.get('email')}, 手机: {self._two_factor_data.get('phone')}")
+
+                # 如果提供了验证码，完成验证
+                if email_code or phone_code:
+                    await self._submit_two_factor(email_code, phone_code, trust_device)
+                else:
+                    raise SEPTwoFactorAuthError(
+                        email=self._two_factor_data.get("email", ""),
+                        phone=self._two_factor_data.get("phone", ""),
+                        user_id=self._two_factor_data.get("user_id", ""),
+                        user_name=self._two_factor_data.get("user_name", "")
+                    )
+
+        # 跟随重定向
+        response = await self.session.get("https://sep.ucas.ac.cn/", follow_redirects=True)
         self._parse_mainpage(response.text)
+        self._is_logged_in = True
         return response.text
+
+    def _parse_two_factor(self, page: str) -> None:
+        """解析二次验证页面"""
+        tree = etree.HTML(page)
+
+        # 邮箱验证表单
+        email_form = tree.xpath("//form[@action='/user/doUserVisit']")
+        if email_form:
+            self._two_factor_data = {
+                "user_id": email_form[0].xpath(".//input[@name='userId']/@value")[0],
+                "user_name": email_form[0].xpath(".//input[@name='userName']/@value")[0],
+                "mobile": email_form[0].xpath(".//input[@name='mobile']/@value")[0],
+            }
+
+            # 提取邮箱和手机号
+            email_text = tree.xpath("//div[contains(text(), '邮箱：')]/text()")
+            phone_text = tree.xpath("//div[contains(text(), '手机号：')]/text()")
+
+            if email_text:
+                self._two_factor_data["email"] = email_text[0].replace("邮箱：", "").strip()
+            if phone_text:
+                self._two_factor_data["phone"] = phone_text[0].replace("手机号：", "").strip()
+
+    async def send_email_code(self) -> bool:
+        """发送邮箱验证码"""
+        if not self._two_factor_data:
+            raise SEPAuthError("无需二次验证或会话已过期")
+
+        data = {
+            "userId": self._two_factor_data["user_id"],
+            "userName": self._two_factor_data["user_name"],
+            "mobile": self._two_factor_data["mobile"],
+        }
+        response = await self.session.post(
+            "https://sep.ucas.ac.cn/user/sendMailCode",
+            data=data
+        )
+        logger.info("邮箱验证码已发送")
+        return True
+
+    async def send_phone_code(self) -> bool:
+        """发送手机验证码"""
+        if not self._two_factor_data:
+            raise SEPAuthError("无需二次验证或会话已过期")
+
+        data = {
+            "userId": self._two_factor_data["user_id"],
+            "userName": self._two_factor_data["user_name"],
+            "mobile": self._two_factor_data["mobile"],
+        }
+        response = await self.session.post(
+            "https://sep.ucas.ac.cn/user/sendPhoneCode",
+            data=data
+        )
+        logger.info("手机验证码已发送")
+        return True
+
+    async def verify_two_factor(
+        self,
+        email_code: Optional[str] = None,
+        phone_code: Optional[str] = None,
+        trust_device: bool = True
+    ) -> bool:
+        """提交二次验证"""
+        return await self._submit_two_factor(email_code, phone_code, trust_device)
+
+    async def _submit_two_factor(
+        self,
+        email_code: Optional[str] = None,
+        phone_code: Optional[str] = None,
+        trust_device: bool = True
+    ) -> bool:
+        """提交二次验证（内部方法）"""
+        if not self._two_factor_data:
+            raise SEPAuthError("无需二次验证或会话已过期")
+
+        # 优先使用邮箱验证码
+        if email_code:
+            verify_data = {
+                "userId": self._two_factor_data["user_id"],
+                "userName": self._two_factor_data["user_name"],
+                "mobile": self._two_factor_data["mobile"],
+                "yz": email_code,
+                "trustDevice": "1" if trust_device else "0",
+            }
+            response = await self.session.post(
+                "https://sep.ucas.ac.cn/user/doUserVisit",
+                data=verify_data,
+                follow_redirects=True
+            )
+        elif phone_code:
+            verify_data = {
+                "userId": self._two_factor_data["user_id"],
+                "userName": self._two_factor_data["user_name"],
+                "mobile": self._two_factor_data["mobile"],
+                "yzPhone": phone_code,
+                "trustDevice": "1" if trust_device else "0",
+            }
+            response = await self.session.post(
+                "https://sep.ucas.ac.cn/user/doUserVisitPhone",
+                data=verify_data,
+                follow_redirects=True
+            )
+        else:
+            raise SEPAuthError("请提供邮箱或手机验证码")
+
+        # 检查是否验证成功
+        if "userVisit" in str(response.url):
+            logger.error("二次验证失败")
+            return False
+
+        # 获取用户信息
+        response = await self.session.get("https://sep.ucas.ac.cn/", follow_redirects=True)
+        self._parse_mainpage(response.text)
+        self._is_logged_in = True
+        self._two_factor_data = None
+        logger.info(f"登录成功！欢迎 {self.name} ({self.student_id})")
+        return True
 
     def _parse_mainpage(self, page: str) -> None:
         """解析首页"""
         try:
             tree = etree.HTML(page)
 
-            stu_card = tree.xpath("//div[@class='card card-body people stude']")[0]
-            name = stu_card.xpath("./p[@class='home']/text()")
-            self.name = name[0].strip() if name else "未找到姓名"
+            stu_card = tree.xpath("//div[@class='card card-body people stude']")
+            if stu_card:
+                name = stu_card[0].xpath("./p[@class='home']/text()")
+                self.name = name[0].strip() if name else "未找到姓名"
 
-            student_id = stu_card.xpath(".//a[starts-with(@href, '/selectNumber')]/text()")
-            self.student_id = student_id[0].strip() if student_id else "未找到学号"
+                student_id = stu_card[0].xpath(".//a[starts-with(@href, '/selectNumber')]/text()")
+                self.student_id = student_id[0].strip() if student_id else "未找到学号"
 
-            unit = stu_card.xpath("./p[position() = last() - 1]/text()")
-            self.unit = unit[0].strip() if unit else "未找到单位"
+                unit = stu_card[0].xpath("./p[position() = last() - 1]/text()")
+                self.unit = unit[0].strip() if unit else "未找到单位"
 
-            logger.info(f"欢迎 {self.name} ({self.student_id}) 来自 {self.unit}")
+                logger.info(f"欢迎 {self.name} ({self.student_id}) 来自 {self.unit}")
+            else:
+                logger.warning("未找到用户信息卡片")
         except Exception as e:
             logger.error(f"Error parsing main page: {e}")
+
+    @property
+    def is_logged_in(self) -> bool:
+        """是否已登录"""
+        return self._is_logged_in
+
+    @property
+    def two_factor_info(self) -> Optional[dict]:
+        """获取二次验证信息"""
+        return self._two_factor_data
 
     async def xkgo(self) -> str:
         """访问选课页面"""
