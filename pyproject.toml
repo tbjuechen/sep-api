@@ -1,0 +1,35 @@
+[project]
+name = "sep-api"
+version = "0.1.0"
+description = "国科大教务系统 API 中转站"
+authors = [{name = "Your Name", email = "your@email.com"}]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx",
+    "fastapi",
+    "uvicorn",
+    "click",
+    "python-dotenv",
+    "pydantic",
+    "loguru",
+    "cryptography",
+    "pillow",
+    "lxml",
+    "numpy",
+    "pytesseract",
+    "antiy-cap",
+]
+
+[project.scripts]
+sep-api = "sep_api.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
