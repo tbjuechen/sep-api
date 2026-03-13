@@ -135,9 +135,9 @@ gQIDAQAB
         if response.status_code in (301, 302, 303, 307, 308):
             location = response.headers.get("Location", "")
             if "userVisit" in location:
-                # 需要二次验证
-                await self.session.get(f"https://sep.ucas.ac.cn{location}")
-                self._parse_two_factor(response.text)
+                # 需要二次验证，先访问验证页面获取内容
+                verify_page = await self.session.get(f"https://sep.ucas.ac.cn{location}")
+                self._parse_two_factor(verify_page.text)
                 logger.info(f"需要二次验证 - 邮箱: {self._two_factor_data.get('email')}, 手机: {self._two_factor_data.get('phone')}")
 
                 # 如果提供了验证码，完成验证
@@ -159,7 +159,12 @@ gQIDAQAB
 
     def _parse_two_factor(self, page: str) -> None:
         """解析二次验证页面"""
+        if not page:
+            return
+
         tree = etree.HTML(page)
+        if tree is None:
+            return
 
         # 邮箱验证表单
         email_form = tree.xpath("//form[@action='/user/doUserVisit']")
