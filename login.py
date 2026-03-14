@@ -2,7 +2,7 @@
 """交互式登录脚本"""
 import asyncio
 import json
-import os
+import sys
 from sep_api.client import SEPClient, SEPTwoFactorAuthError
 
 
@@ -11,13 +11,9 @@ async def main():
     print("  国科大教务系统登录")
     print("=" * 50)
 
-    # 检查是否有命令行参数
-    import sys
     username = sys.argv[1] if len(sys.argv) > 1 else None
     password = sys.argv[2] if len(sys.argv) > 2 else None
-    code = sys.argv[3] if len(sys.argv) > 3 else None
 
-    # 交互式输入
     if not username:
         username = input("\n用户名: ").strip()
     if not password:
@@ -40,23 +36,18 @@ async def main():
         try:
             await client.login(username, password, captcha)
         except SEPTwoFactorAuthError as e:
-            print(f"\n   需要二次验证:")
+            print(f"\n   ⚠️ 需要二次验证!")
+            print(f"   ────────────────────────")
             print(f"   1. 邮箱: {e.email}")
             print(f"   2. 手机: {e.phone}")
-
-            if code:
-                # 命令行提供了验证码
-                await client.verify_two_factor(email_code=code)
-            else:
-                choice = input("\n选择验证方式 (1/2): ").strip()
-                if choice == "1":
-                    await client.send_email_code()
-                    code = input("输入邮箱验证码: ").strip()
-                    await client.verify_two_factor(email_code=code)
-                else:
-                    await client.send_phone_code()
-                    code = input("输入手机验证码: ").strip()
-                    await client.verify_two_factor(phone_code=code)
+            print(f"   ────────────────────────")
+            print("\n   请在浏览器中手动完成验证，然后重新运行脚本")
+            print("   或者：")
+            print("   1. 打开 https://sep.ucas.ac.cn")
+            print("   2. 在浏览器中登录")
+            print("   3. 勾选'设为可信任设备'")
+            print("   4. 之后API登录就不需要验证了")
+            sys.exit(1)
 
         print(f"\n[4/5] 登录成功!")
         print(f"   姓名: {client.name}")
