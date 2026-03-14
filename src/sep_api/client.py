@@ -5,7 +5,6 @@
 import base64
 import re
 import time
-from io import BytesIO
 from typing import Optional
 
 import httpx
@@ -127,7 +126,6 @@ gQIDAQAB
         response = await self.session.post(
             api_url, data=data, follow_redirects=False
         )
-        # 不对 3xx 重定向调用 raise_for_status()
         if response.status_code >= 400:
             response.raise_for_status()
 
@@ -135,12 +133,11 @@ gQIDAQAB
         if response.status_code in (301, 302, 303, 307, 308):
             location = response.headers.get("Location", "")
             if "userVisit" in location:
-                # 需要二次验证，先访问验证页面获取内容
+                # 需要二次验证
                 verify_page = await self.session.get(f"https://sep.ucas.ac.cn{location}")
                 self._parse_two_factor(verify_page.text)
                 logger.info(f"需要二次验证 - 邮箱: {self._two_factor_data.get('email')}, 手机: {self._two_factor_data.get('phone')}")
 
-                # 如果提供了验证码，完成验证
                 if email_code or phone_code:
                     await self._submit_two_factor(email_code, phone_code, trust_device)
                 else:
@@ -166,7 +163,6 @@ gQIDAQAB
         if tree is None:
             return
 
-        # 邮箱验证表单
         email_form = tree.xpath("//form[@action='/user/doUserVisit']")
         if email_form:
             self._two_factor_data = {
@@ -175,7 +171,6 @@ gQIDAQAB
                 "mobile": email_form[0].xpath(".//input[@name='mobile']/@value")[0],
             }
 
-            # 提取邮箱和手机号
             email_text = tree.xpath("//div[contains(text(), '邮箱：')]/text()")
             phone_text = tree.xpath("//div[contains(text(), '手机号：')]/text()")
 
@@ -194,10 +189,7 @@ gQIDAQAB
             "userName": self._two_factor_data["user_name"],
             "mobile": self._two_factor_data["mobile"],
         }
-        response = await self.session.post(
-            "https://sep.ucas.ac.cn/user/sendMailCode",
-            data=data
-        )
+        await self.session.post("https://sep.ucas.ac.cn/user/sendMailCode", data=data)
         logger.info("邮箱验证码已发送")
         return True
 
@@ -211,10 +203,7 @@ gQIDAQAB
             "userName": self._two_factor_data["user_name"],
             "mobile": self._two_factor_data["mobile"],
         }
-        response = await self.session.post(
-            "https://sep.ucas.ac.cn/user/sendPhoneCode",
-            data=data
-        )
+        await self.session.post("https://sep.ucas.ac.cn/user/sendPhoneCode", data=data)
         logger.info("手机验证码已发送")
         return True
 
@@ -233,11 +222,10 @@ gQIDAQAB
         phone_code: Optional[str] = None,
         trust_device: bool = True
     ) -> bool:
-        """提交二次验证（内部方法）"""
+        """提交二次验证"""
         if not self._two_factor_data:
             raise SEPAuthError("无需二次验证或会话已过期")
 
-        # 优先使用邮箱验证码
         if email_code:
             verify_data = {
                 "userId": self._two_factor_data["user_id"],
@@ -267,12 +255,10 @@ gQIDAQAB
         else:
             raise SEPAuthError("请提供邮箱或手机验证码")
 
-        # 检查是否验证成功
         if "userVisit" in str(response.url):
             logger.error("二次验证失败")
             return False
 
-        # 获取用户信息
         response = await self.session.get("https://sep.ucas.ac.cn/", follow_redirects=True)
         self._parse_mainpage(response.text)
         self._is_logged_in = True
@@ -285,31 +271,51 @@ gQIDAQAB
         try:
             tree = etree.HTML(page)
 
-            stu_card = tree.xpath("//div[@class='card card-body people stude']")
+            # 方式1: 查找学生卡片
+            stu_card = tree.xpath("//div[contains(@class, 'stude')]")
             if stu_card:
-                name = stu_card[0].xpath("./p[@class='home']/text()")
-                self.name = name[0].strip() if name else "未找到姓名"
+                # 姓名
+                name = stu_card[0].xpath(".//p[@class='home']//text()")
+                self.name = "".join(name).strip() if name else "未找到姓名"
 
-                student_id = stu_card[0].xpath(".//a[starts-with(@href, '/selectNumber')]/text()")
+                # 学号
+                student_id = stu_card[0].xpath(".//a[contains(@href, '/selectNumber')]/text()")
+                if not student_id:
+                    student_id = stu_card[0].xpath(".//a[contains(@href, 'selectNumber')]/text()")
                 self.student_id = student_id[0].strip() if student_id else "未找到学号"
 
-                unit = stu_card[0].xpath("./p[position() = last() - 1]/text()")
-                self.unit = unit[0].strip() if unit else "未找到单位"
+                # 单位
+                unit = stu_card[0].xpath("./p[position() = last()]/text()")
+                if not unit:
+                    unit = stu_card[0].xpath(".//div[contains(@class, 'character')]//text()")
+                self.unit = "".join(unit).strip() if unit else "未找到单位"
 
-                logger.info(f"欢迎 {self.name} ({self.student_id}) 来自 {self.unit}")
+                logger.info(f"欢迎 {self.name} ({self.student_id})")
+                return
+
+            # 方式2: 从整个页面搜索
+            import re
+            name_match = re.search(r'class="home"[^>]*>\s*(\S+)', page)
+            if name_match:
+                self.name = name_match.group(1).strip()
+
+            stu_id_match = re.search(r'number=(\d+)', page)
+            if stu_id_match:
+                self.student_id = stu_id_match.group(1)
+
+            if self.name:
+                logger.info(f"欢迎 {self.name} ({self.student_id})")
             else:
-                logger.warning("未找到用户信息卡片")
+                logger.warning("未找到用户信息")
         except Exception as e:
             logger.error(f"Error parsing main page: {e}")
 
     @property
     def is_logged_in(self) -> bool:
-        """是否已登录"""
         return self._is_logged_in
 
     @property
     def two_factor_info(self) -> Optional[dict]:
-        """获取二次验证信息"""
         return self._two_factor_data
 
     async def xkgo(self) -> str:
@@ -339,15 +345,12 @@ gQIDAQAB
 
             course = {
                 "课程编码": cols[0].xpath(".//a/text()")[0] if cols[0].xpath(".//a/text()") else "",
-                "课程编码链接": cols[0].xpath(".//a/@href")[0] if cols[0].xpath(".//a/@href") else "",
                 "课程名称": cols[1].xpath(".//a/text()")[0] if cols[1].xpath(".//a/text()") else "",
-                "课程名称链接": cols[1].xpath(".//a/@href")[0] if cols[1].xpath(".//a/@href") else "",
                 "课时": cols[2].text.strip() if cols[2].text else "",
                 "学分": cols[3].text.strip() if cols[3].text else "",
                 "学位课": cols[4].text.strip() if cols[4].text else "",
                 "考试方式": cols[5].text.strip() if cols[5].text else "",
                 "主讲教师": cols[6].xpath(".//a/text()")[0] if cols[6].xpath(".//a/text()") else "",
-                "教师链接": cols[6].xpath(".//a/@href")[0] if cols[6].xpath(".//a/@href") else "",
                 "跨学期课程": cols[7].text.strip() if cols[7].text else "",
             }
             courses.append(course)
