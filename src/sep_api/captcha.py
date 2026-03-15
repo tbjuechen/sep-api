@@ -45,7 +45,10 @@ class TesseractHandler(BaseCaptchaHandler):
         img = img.point(lambda x: 255 if x > threshold else 0)
         img = img.convert("1")
 
-        result = self.pytesseract.image_to_string(img, config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789")
+        result = self.pytesseract.image_to_string(
+            img,
+            config="--psm 7 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
+        )
         return result.strip()
 
 

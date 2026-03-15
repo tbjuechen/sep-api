@@ -18,6 +18,8 @@ dependencies = [
     "lxml",
     "numpy",
     "pytesseract",
+    "rich",
+    "InquirerPy",
 ]
 
 [project.scripts]

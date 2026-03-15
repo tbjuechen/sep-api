@@ -3,8 +3,10 @@
 """
 
 import base64
+import json
 import re
 import time
+from pathlib import Path
 from typing import Optional
 
 import httpx
@@ -13,14 +15,18 @@ from lxml import etree
 
 from .captcha import CaptchaHandler
 
+SESSION_FILE = Path(".sep_session.json")
+
 
 class SEPAuthError(Exception):
     """认证错误"""
+
     pass
 
 
 class SEPTwoFactorAuthError(SEPAuthError):
     """二次验证错误，需要邮箱或手机验证码"""
+
     def __init__(self, email: str, phone: str, user_id: str, user_name: str):
         self.email = email
         self.phone = phone
@@ -104,9 +110,13 @@ gQIDAQAB
         return base64.b64encode(encrypted).decode()
 
     async def login(
-        self, username: str, password: str, captcha: Optional[str] = None,
-        email_code: Optional[str] = None, phone_code: Optional[str] = None,
-        trust_device: bool = True
+        self,
+        username: str,
+        password: str,
+        captcha: Optional[str] = None,
+        email_code: Optional[str] = None,
+        phone_code: Optional[str] = None,
+        trust_device: bool = True,
     ) -> str:
         """登录（支持二次验证）"""
         if not captcha:
@@ -123,9 +133,7 @@ gQIDAQAB
             "sb": "sb",
         }
 
-        response = await self.session.post(
-            api_url, data=data, follow_redirects=False
-        )
+        response = await self.session.post(api_url, data=data, follow_redirects=False)
         if response.status_code >= 400:
             response.raise_for_status()
 
@@ -136,7 +144,9 @@ gQIDAQAB
                 # 需要二次验证
                 verify_page = await self.session.get(f"https://sep.ucas.ac.cn{location}")
                 self._parse_two_factor(verify_page.text)
-                logger.info(f"需要二次验证 - 邮箱: {self._two_factor_data.get('email')}, 手机: {self._two_factor_data.get('phone')}")
+                logger.info(
+                    f"需要二次验证 - 邮箱: {self._two_factor_data.get('email')}, 手机: {self._two_factor_data.get('phone')}"
+                )
 
                 if email_code or phone_code:
                     await self._submit_two_factor(email_code, phone_code, trust_device)
@@ -146,7 +156,7 @@ gQIDAQAB
                         email=self._two_factor_data.get("email", ""),
                         phone=self._two_factor_data.get("phone", ""),
                         user_id=self._two_factor_data.get("user_id", ""),
-                        user_name=self._two_factor_data.get("user_name", "")
+                        user_name=self._two_factor_data.get("user_name", ""),
                     )
 
         # 跟随重定向
@@ -229,7 +239,7 @@ gQIDAQAB
         self,
         email_code: Optional[str] = None,
         phone_code: Optional[str] = None,
-        trust_device: bool = True
+        trust_device: bool = True,
     ) -> bool:
         """提交二次验证"""
         return await self._submit_two_factor(email_code, phone_code, trust_device)
@@ -238,7 +248,7 @@ gQIDAQAB
         self,
         email_code: Optional[str] = None,
         phone_code: Optional[str] = None,
-        trust_device: bool = True
+        trust_device: bool = True,
     ) -> bool:
         """提交二次验证"""
         if not self._two_factor_data:
@@ -253,9 +263,7 @@ gQIDAQAB
                 "trustDevice": "1" if trust_device else "0",
             }
             response = await self.session.post(
-                "https://sep.ucas.ac.cn/user/doUserVisit",
-                data=verify_data,
-                follow_redirects=True
+                "https://sep.ucas.ac.cn/user/doUserVisit", data=verify_data, follow_redirects=True
             )
         elif phone_code:
             verify_data = {
@@ -268,7 +276,7 @@ gQIDAQAB
             response = await self.session.post(
                 "https://sep.ucas.ac.cn/user/doUserVisitPhone",
                 data=verify_data,
-                follow_redirects=True
+                follow_redirects=True,
             )
         else:
             raise SEPAuthError("请提供邮箱或手机验证码")
@@ -324,7 +332,7 @@ gQIDAQAB
             if name_match:
                 self.name = name_match.group(1).strip()
 
-            stu_id_match = re.search(r'number=(\w+)', page)
+            stu_id_match = re.search(r"number=(\w+)", page)
             if stu_id_match:
                 self.student_id = stu_id_match.group(1)
 
@@ -462,6 +470,36 @@ gQIDAQAB
             return "ERROR", error[0].strip()
 
         return "unknown", None
+
+    def save_session(self, path: Path = SESSION_FILE) -> None:
+        """保存会话到文件"""
+        data = {
+            "cookies": dict(self.session.cookies),
+            "user_info": self.user_info,
+        }
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2))
+
+    @classmethod
+    def restore_session(cls, path: Path = SESSION_FILE) -> "SEPClient":
+        """从文件恢复会话"""
+        data = json.loads(path.read_text())
+        client = cls()
+        for name, value in data["cookies"].items():
+            client.session.cookies.set(name, value)
+        info = data["user_info"]
+        client.name = info.get("name")
+        client.student_id = info.get("student_id")
+        client.unit = info.get("unit")
+        client._is_logged_in = True
+        return client
+
+    async def validate_session(self) -> bool:
+        """验证会话是否有效"""
+        try:
+            response = await self.session.get("https://sep.ucas.ac.cn/", follow_redirects=True)
+            return self.name is not None and self.name in response.text
+        except Exception:
+            return False
 
     async def close(self) -> None:
         """关闭会话"""
