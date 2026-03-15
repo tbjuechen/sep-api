@@ -140,6 +140,7 @@ gQIDAQAB
 
                 if email_code or phone_code:
                     await self._submit_two_factor(email_code, phone_code, trust_device)
+                    return ""
                 else:
                     raise SEPTwoFactorAuthError(
                         email=self._two_factor_data.get("email", ""),
@@ -151,45 +152,60 @@ gQIDAQAB
         # 跟随重定向
         response = await self.session.get("https://sep.ucas.ac.cn/", follow_redirects=True)
         self._parse_mainpage(response.text)
+        if not self.name:
+            raise SEPAuthError("登录失败，可能是验证码错误")
         self._is_logged_in = True
         return response.text
 
     def _parse_two_factor(self, page: str) -> None:
         """解析二次验证页面"""
         if not page:
-            return
+            raise SEPAuthError("二次验证页面为空")
 
         tree = etree.HTML(page)
         if tree is None:
-            return
+            raise SEPAuthError("二次验证页面解析失败")
 
         email_form = tree.xpath("//form[@action='/user/doUserVisit']")
-        if email_form:
-            self._two_factor_data = {
-                "user_id": email_form[0].xpath(".//input[@name='userId']/@value")[0],
-                "user_name": email_form[0].xpath(".//input[@name='userName']/@value")[0],
-                "mobile": email_form[0].xpath(".//input[@name='mobile']/@value")[0],
-            }
+        if not email_form:
+            logger.debug(f"二次验证页面内容: {page[:500]}")
+            raise SEPAuthError("未找到二次验证表单")
 
-            email_text = tree.xpath("//div[contains(text(), '邮箱：')]/text()")
-            phone_text = tree.xpath("//div[contains(text(), '手机号：')]/text()")
+        user_id = email_form[0].xpath(".//input[@name='userId']/@value")
+        user_name = email_form[0].xpath(".//input[@name='userName']/@value")
+        mobile = email_form[0].xpath(".//input[@name='mobile']/@value")
 
-            if email_text:
-                self._two_factor_data["email"] = email_text[0].replace("邮箱：", "").strip()
-            if phone_text:
-                self._two_factor_data["phone"] = phone_text[0].replace("手机号：", "").strip()
+        if not user_id or not user_name:
+            logger.debug(f"表单内容: {etree.tostring(email_form[0], encoding='unicode')[:500]}")
+            raise SEPAuthError("二次验证表单缺少 userId 或 userName")
+
+        self._two_factor_data = {
+            "user_id": user_id[0],
+            "user_name": user_name[0],
+            "mobile": mobile[0] if mobile else "",
+        }
+
+        email_text = tree.xpath("//div[contains(text(), '邮箱：')]/text()")
+        phone_text = tree.xpath("//div[contains(text(), '手机号：')]/text()")
+
+        if email_text:
+            self._two_factor_data["email"] = email_text[0].replace("邮箱：", "").strip()
+        if phone_text:
+            self._two_factor_data["phone"] = phone_text[0].replace("手机号：", "").strip()
 
     async def send_email_code(self) -> bool:
         """发送邮箱验证码"""
         if not self._two_factor_data:
             raise SEPAuthError("无需二次验证或会话已过期")
 
-        data = {
-            "userId": self._two_factor_data["user_id"],
-            "userName": self._two_factor_data["user_name"],
-            "mobile": self._two_factor_data["mobile"],
-        }
-        await self.session.post("https://sep.ucas.ac.cn/user/sendMailCode", data=data)
+        response = await self.session.post(
+            "https://sep.ucas.ac.cn/user/yzUserName",
+            content=self._two_factor_data["user_name"],
+            headers={"Content-Type": "application/json"},
+        )
+        logger.debug(f"邮箱验证码响应 (status={response.status_code}): {response.text[:200]}")
+        if response.status_code >= 400:
+            response.raise_for_status()
         logger.info("邮箱验证码已发送")
         return True
 
@@ -198,12 +214,14 @@ gQIDAQAB
         if not self._two_factor_data:
             raise SEPAuthError("无需二次验证或会话已过期")
 
-        data = {
-            "userId": self._two_factor_data["user_id"],
-            "userName": self._two_factor_data["user_name"],
-            "mobile": self._two_factor_data["mobile"],
-        }
-        await self.session.post("https://sep.ucas.ac.cn/user/sendPhoneCode", data=data)
+        response = await self.session.post(
+            "https://sep.ucas.ac.cn/user/yzMobile",
+            content=self._two_factor_data["mobile"],
+            headers={"Content-Type": "application/json"},
+        )
+        logger.debug(f"手机验证码响应 (status={response.status_code}): {response.text[:200]}")
+        if response.status_code >= 400:
+            response.raise_for_status()
         logger.info("手机验证码已发送")
         return True
 
@@ -271,35 +289,42 @@ gQIDAQAB
         try:
             tree = etree.HTML(page)
 
-            # 方式1: 查找学生卡片
-            stu_card = tree.xpath("//div[contains(@class, 'stude')]")
-            if stu_card:
+            # 方式1: 查找学生卡片（排除 navbar 中的 student 类）
+            stu_cards = tree.xpath("//div[contains(@class, 'card') and contains(@class, 'stude')]")
+            if not stu_cards:
+                stu_cards = tree.xpath("//div[contains(@class, 'stude')]")
+
+            for stu_card in stu_cards:
+                name = stu_card.xpath(".//p[@class='home']//text()")
+                if not name:
+                    continue
+
                 # 姓名
-                name = stu_card[0].xpath(".//p[@class='home']//text()")
-                self.name = "".join(name).strip() if name else "未找到姓名"
+                self.name = "".join(name).strip()
 
                 # 学号
-                student_id = stu_card[0].xpath(".//a[contains(@href, '/selectNumber')]/text()")
-                if not student_id:
-                    student_id = stu_card[0].xpath(".//a[contains(@href, 'selectNumber')]/text()")
+                student_id = stu_card.xpath(".//a[contains(@href, 'selectNumber')]/text()")
                 self.student_id = student_id[0].strip() if student_id else "未找到学号"
 
-                # 单位
-                unit = stu_card[0].xpath("./p[position() = last()]/text()")
-                if not unit:
-                    unit = stu_card[0].xpath(".//div[contains(@class, 'character')]//text()")
-                self.unit = "".join(unit).strip() if unit else "未找到单位"
+                # 单位 — 取最后一个有文本内容的 <p>
+                all_p = stu_card.xpath("./p")
+                for p in reversed(all_p):
+                    text = "".join(p.xpath(".//text()")).strip()
+                    if text and text != self.name:
+                        self.unit = text
+                        break
+                if not self.unit:
+                    self.unit = "未找到单位"
 
                 logger.info(f"欢迎 {self.name} ({self.student_id})")
                 return
 
             # 方式2: 从整个页面搜索
-            import re
             name_match = re.search(r'class="home"[^>]*>\s*(\S+)', page)
             if name_match:
                 self.name = name_match.group(1).strip()
 
-            stu_id_match = re.search(r'number=(\d+)', page)
+            stu_id_match = re.search(r'number=(\w+)', page)
             if stu_id_match:
                 self.student_id = stu_id_match.group(1)
 
@@ -404,21 +429,21 @@ gQIDAQAB
         await self.get_submit_captcha()
 
         api_url = "http://xkgo.ucas.ac.cn:3000/courseManage/saveCourse"
-        data = {
-            "vcode": self._captcha_result,
-            "deptIds": 979,
-            "deptIds": 244,
-            "deptIds": 245,
-            "deptIds": 246,
-            "deptIds": 247,
-            "deptIds": 248,
-            "deptIds": 249,
-            "deptIds": 250,
-            "deptIds": 251,
-            "deptIds": 252,
-            "deptIds": 253,
-            "sids": course_id,
-        }
+        data = [
+            ("vcode", self._captcha_result),
+            ("deptIds", 979),
+            ("deptIds", 244),
+            ("deptIds", 245),
+            ("deptIds", 246),
+            ("deptIds", 247),
+            ("deptIds", 248),
+            ("deptIds", 249),
+            ("deptIds", 250),
+            ("deptIds", 251),
+            ("deptIds", 252),
+            ("deptIds", 253),
+            ("sids", course_id),
+        ]
         response = await self.session.post(api_url, data=data)
         response.raise_for_status()
 

@@ -3,7 +3,9 @@
 import asyncio
 import json
 import sys
-from sep_api.client import SEPClient, SEPTwoFactorAuthError
+from sep_api.client import SEPClient, SEPAuthError, SEPTwoFactorAuthError
+
+MAX_CAPTCHA_RETRIES = 5
 
 
 async def main():
@@ -25,31 +27,49 @@ async def main():
         await client.initialize()
         print("   ✓")
 
-        print("\n[2/5] 获取验证码...")
-        image_bytes = await client.get_captcha()
-        captcha = await client.recognize_captcha(image_bytes)
-        with open("captcha.png", "wb") as f:
-            f.write(image_bytes)
-        print(f"   验证码: {captcha} (已保存到 captcha.png)")
+        for attempt in range(1, MAX_CAPTCHA_RETRIES + 1):
+            print(f"\n[2/5] 获取验证码 (第 {attempt} 次)...")
+            image_bytes = await client.get_captcha()
+            captcha = await client.recognize_captcha(image_bytes)
+            with open("captcha.png", "wb") as f:
+                f.write(image_bytes)
+            print(f"   验证码: {captcha} (已保存到 captcha.png)")
 
-        print("\n[3/5] 登录中...")
-        try:
-            await client.login(username, password, captcha)
-        except SEPTwoFactorAuthError as e:
-            print(f"\n   ⚠️ 需要二次验证!")
-            print(f"   ────────────────────────")
-            print(f"   1. 邮箱: {e.email}")
-            print(f"   2. 手机: {e.phone}")
-            print(f"   ────────────────────────")
-            print("\n   请在浏览器中手动完成验证，然后重新运行脚本")
-            print("   或者：")
-            print("   1. 打开 https://sep.ucas.ac.cn")
-            print("   2. 在浏览器中登录")
-            print("   3. 勾选'设为可信任设备'")
-            print("   4. 之后API登录就不需要验证了")
-            sys.exit(1)
+            print("\n[3/5] 登录中...")
+            try:
+                await client.login(username, password, captcha)
+                break  # 登录成功
+            except SEPTwoFactorAuthError as e:
+                print("\n   ⚠️ 需要二次验证!")
+                print("   ────────────────────────")
+                print(f"   1. 邮箱: {e.email}")
+                print(f"   2. 手机: {e.phone}")
+                print("   ────────────────────────")
+                choice = input("\n   请选择验证方式 (1=邮箱, 2=手机): ").strip()
 
-        print(f"\n[4/5] 登录成功!")
+                if choice == "2":
+                    print("   发送手机验证码...")
+                    await client.send_phone_code()
+                    code = input("   请输入手机验证码: ").strip()
+                    success = await client.verify_two_factor(phone_code=code)
+                else:
+                    print("   发送邮箱验证码...")
+                    await client.send_email_code()
+                    code = input("   请输入邮箱验证码: ").strip()
+                    success = await client.verify_two_factor(email_code=code)
+
+                if not success:
+                    print("\n   ❌ 二次验证失败")
+                    sys.exit(1)
+                print("   ✓ 二次验证成功")
+                break
+            except SEPAuthError as e:
+                if attempt < MAX_CAPTCHA_RETRIES:
+                    print(f"   ✗ {e}，重试...")
+                else:
+                    raise
+
+        print("\n[4/5] 登录成功!")
         print(f"   姓名: {client.name}")
         print(f"   学号: {client.student_id}")
         print(f"   单位: {client.unit}")
@@ -62,7 +82,7 @@ async def main():
         }
         with open(".sep_session.json", "w") as f:
             json.dump(session_data, f, ensure_ascii=False)
-        print(f"\n[5/5] 会话已保存到 .sep_session.json")
+        print("\n[5/5] 会话已保存到 .sep_session.json")
 
         # 获取课程
         await client.xkgo()

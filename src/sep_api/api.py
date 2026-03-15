@@ -4,18 +4,14 @@ FastAPI RESTful API
 
 import base64
 from contextlib import asynccontextmanager
-from typing import Optional
 
-import httpx
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
 from loguru import logger
 
 from .client import SEPClient
 from .models import (
     CaptchaResponse,
     CourseListResponse,
-    ErrorResponse,
     LoginRequest,
     LoginResponse,
     SelectCourseRequest,
