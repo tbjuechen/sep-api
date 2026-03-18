@@ -34,17 +34,22 @@ class LoginResponse(BaseModel):
 class Course(BaseModel):
     """课程信息"""
 
-    课程编码: str
-    课程编码链接: str
-    课程名称: str
-    课程名称链接: str
-    课时: str
-    学分: str
-    学位课: str
-    考试方式: str
-    主讲教师: str
-    教师链接: str
-    跨学期课程: str
+    课程编码: Optional[str] = None
+    课程编码链接: Optional[str] = None
+    课程名称: Optional[str] = None
+    课程名称链接: Optional[str] = None
+    课时: Optional[str] = None
+    学分: Optional[str] = None
+    学位课: Optional[str] = None
+    考试方式: Optional[str] = None
+    主讲教师: Optional[str] = None
+    教师链接: Optional[str] = None
+    跨学期课程: Optional[str] = None
+
+    class Config:
+        """配置"""
+
+        extra = "allow"
 
 
 class CourseListResponse(BaseModel):
@@ -77,8 +82,49 @@ class CaptchaResponse(BaseModel):
     message: str = "请输入验证码"
 
 
-class ErrorResponse(BaseModel):
-    """错误响应"""
+class Grade(BaseModel):
+    """成绩信息"""
 
-    error: str
-    detail: Optional[str] = None
+    课程编码: Optional[str] = None
+    课程名称: Optional[str] = None
+    学分: Optional[str] = None
+    成绩: Optional[str] = None
+    性质: Optional[str] = None
+    学年: Optional[str] = None
+    学期: Optional[str] = None
+
+    class Config:
+        """配置"""
+
+        extra = "allow"
+
+
+class GradeListResponse(BaseModel):
+    """成绩列表响应"""
+
+    success: bool
+    grades: list[Grade]
+    count: int
+
+
+class Lecture(BaseModel):
+    """讲座信息"""
+
+    讲座名称: Optional[str] = None
+    主讲人: Optional[str] = None
+    讲座地点: Optional[str] = None
+    讲座时间: Optional[str] = None
+    学分: Optional[str] = None
+
+    class Config:
+        """配置"""
+
+        extra = "allow"
+
+
+class LectureListResponse(BaseModel):
+    """讲座列表响应"""
+
+    success: bool
+    lectures: list[Lecture]
+    count: int

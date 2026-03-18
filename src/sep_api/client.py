@@ -2,18 +2,22 @@
 国科大教务系统 API 客户端
 """
 
+from __future__ import annotations
+
 import base64
 import json
 import re
-import time
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import httpx
 from loguru import logger
 from lxml import etree
 
 from .captcha import CaptchaHandler
+
+if TYPE_CHECKING:
+    from .services.base import BaseService
 
 SESSION_FILE = Path(".sep_session.json")
 
@@ -64,7 +68,6 @@ class SEPClient:
         self.name: Optional[str] = None
         self.student_id: Optional[str] = None
         self.unit: Optional[str] = None
-        self.courses: list = []
         self._is_logged_in = False
 
     async def initialize(self) -> None:
@@ -351,125 +354,9 @@ gQIDAQAB
     def two_factor_info(self) -> Optional[dict]:
         return self._two_factor_data
 
-    async def xkgo(self) -> str:
-        """访问选课页面"""
-        api_url = "https://sep.ucas.ac.cn/portal/site/524/2412"
-        response = await self.session.get(api_url, follow_redirects=True)
-        response.raise_for_status()
-
-        match = re.search(r"window\.location\.href\s*=\s*'([^']+)'", response.text)
-        if match:
-            logger.debug(f"Redirecting to: {match.group(1)}")
-            response = await self.session.get(match.group(1), follow_redirects=True)
-            response.raise_for_status()
-
-        self.courses = self._parse_xkgo(response.text)
-        return response.text
-
-    def _parse_xkgo(self, page: str) -> list:
-        """解析选课页面课程列表"""
-        tree = etree.HTML(page)
-        courses = []
-
-        for row in tree.xpath("//table/tbody/tr"):
-            cols = row.xpath("./td")
-            if len(cols) < 8:
-                continue
-
-            course = {
-                "课程编码": cols[0].xpath(".//a/text()")[0] if cols[0].xpath(".//a/text()") else "",
-                "课程名称": cols[1].xpath(".//a/text()")[0] if cols[1].xpath(".//a/text()") else "",
-                "课时": cols[2].text.strip() if cols[2].text else "",
-                "学分": cols[3].text.strip() if cols[3].text else "",
-                "学位课": cols[4].text.strip() if cols[4].text else "",
-                "考试方式": cols[5].text.strip() if cols[5].text else "",
-                "主讲教师": cols[6].xpath(".//a/text()")[0] if cols[6].xpath(".//a/text()") else "",
-                "跨学期课程": cols[7].text.strip() if cols[7].text else "",
-            }
-            courses.append(course)
-
-        self.courses = courses
-        return courses
-
-    async def select_course(self, course_code: str) -> str:
-        """搜索课程"""
-        api_url = "http://xkgo.ucas.ac.cn:3000/courseManage/selectCourse"
-        data = {
-            "type": "",
-            "deptIds1": "&deptIds=979&deptIds=244&deptIds=245&deptIds=246&deptIds=247&deptIds=248&deptIds=249&deptIds=250&deptIds=251&deptIds=252&deptIds=253",
-            "courseType1": "&courseType=1&courseType=2&courseType=3",
-            "courseCode": course_code,
-            "courseName": "",
-        }
-        response = await self.session.post(api_url, data=data)
-        response.raise_for_status()
-        return response.text
-
-    def course_parser(self, html: str) -> list:
-        """解析课程搜索结果"""
-        tree = etree.HTML(html)
-        headers = tree.xpath("//table/thead/tr/th/text()")
-
-        result = []
-        for tr in tree.xpath("//table/tbody[@id='courseinfo']/tr"):
-            cells = tr.xpath("./td")
-            row_data = {}
-            for header, td in zip(headers, cells):
-                text = "".join(td.xpath(".//text()")).strip()
-                row_data[header] = text
-            row_data["选课"] = tr.xpath(".//input/@value")[0]
-            result.append(row_data)
-
-        return result
-
-    async def get_submit_captcha(self) -> bytes:
-        """获取选课验证码"""
-        timestamp = int(time.time() * 1000)
-        api_url = "http://xkgo.ucas.ac.cn:3000/captchaImage"
-        response = await self.session.get(api_url, params={"_": timestamp})
-        response.raise_for_status()
-        img_data = base64.b64decode(response.text.split(",")[1])
-        await self.recognize_captcha(img_data)
-        return img_data
-
-    async def submit_course(self, course_id: str) -> tuple:
-        """提交选课"""
-        await self.get_submit_captcha()
-
-        api_url = "http://xkgo.ucas.ac.cn:3000/courseManage/saveCourse"
-        data = [
-            ("vcode", self._captcha_result),
-            ("deptIds", 979),
-            ("deptIds", 244),
-            ("deptIds", 245),
-            ("deptIds", 246),
-            ("deptIds", 247),
-            ("deptIds", 248),
-            ("deptIds", 249),
-            ("deptIds", 250),
-            ("deptIds", 251),
-            ("deptIds", 252),
-            ("deptIds", 253),
-            ("sids", course_id),
-        ]
-        response = await self.session.post(api_url, data=data)
-        response.raise_for_status()
-
-        return self._parse_status(response.text)
-
-    def _parse_status(self, page: str) -> tuple:
-        """解析选课结果"""
-        tree = etree.HTML(page)
-
-        success = tree.xpath('//label[@id="loginSuccess"]/text()')
-        if success and success[0].strip():
-            return "SUCCESS", success[0].strip()
-
-        error = tree.xpath('//label[@id="loginError"]/text()')
-        if error and error[0].strip():
-            return "ERROR", error[0].strip()
-
-        return "unknown", None
+    def get_service(self, service_cls: type[BaseService]) -> BaseService:
+        """获取子系统 service 实例（共享 session）"""
+        return service_cls(self)
 
     def save_session(self, path: Path = SESSION_FILE) -> None:
         """保存会话到文件"""
