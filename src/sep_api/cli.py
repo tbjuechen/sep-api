@@ -149,20 +149,17 @@ def _render_course_table(
         default_exclude.extend(exclude_cols)
 
     table = Table(title=title, show_lines=True)
-    
+
     # 确定要显示的列头，自动排除隐藏列和链接列
     all_headers = list(data[0].keys())
-    visible_headers = [
-        h for h in all_headers 
-        if h and h not in default_exclude and "链接" not in h
-    ]
+    visible_headers = [h for h in all_headers if h and h not in default_exclude and "链接" not in h]
 
     for h in visible_headers:
         table.add_column(h)
-    
+
     for row in data:
         table.add_row(*[str(row.get(h, "")) for h in visible_headers])
-    
+
     Console().print(table)
 
 
@@ -243,7 +240,9 @@ async def _interactive_main() -> None:
 
     try:
         while True:
-            action = await inquirer.select(message="请选择操作:", choices=menu_choices).execute_async()
+            action = await inquirer.select(
+                message="请选择操作:", choices=menu_choices
+            ).execute_async()
 
             if action == "选课管理":
                 sub_action = await inquirer.select(
@@ -290,19 +289,26 @@ async def _interactive_main() -> None:
                         _render_course_table(grades, title=f"所有成绩 ({len(grades)} 门)")
                     elif sub_action == "课程评估 (一键全优)":
                         eval_list = await xkcts.get_evaluation_list()
-                        to_eval = [c for c in eval_list if "评估" in c.get("状态", "") and c.get("评估链接")]
-                        
+                        to_eval = [
+                            c
+                            for c in eval_list
+                            if "评估" in c.get("状态", "") and c.get("评估链接")
+                        ]
+
                         if not to_eval:
                             from rich.console import Console
+
                             Console().print("[green]没有需要评估的课程。[/green]")
                         else:
                             _render_course_table(to_eval, title="待评估课程")
                             confirm = await inquirer.confirm(
-                                message=f"确认自动评估这 {len(to_eval)} 门课程 (全优+好评)?", default=True
+                                message=f"确认自动评估这 {len(to_eval)} 门课程 (全优+好评)?",
+                                default=True,
                             ).execute_async()
-                            
+
                             if confirm:
                                 from rich.progress import track
+
                                 for c in track(to_eval, description="正在评估..."):
                                     success, msg = await xkcts.auto_evaluate_course(c["评估链接"])
                                     if not success:

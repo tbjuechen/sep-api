@@ -32,15 +32,11 @@ class XkgoService(BaseService):
                 continue
 
             course = {
-                "课程编码": cols[0].xpath(".//a/text()")[0]
-                if cols[0].xpath(".//a/text()")
-                else "",
+                "课程编码": cols[0].xpath(".//a/text()")[0] if cols[0].xpath(".//a/text()") else "",
                 "课程编码链接": cols[0].xpath(".//a/@href")[0]
                 if cols[0].xpath(".//a/@href")
                 else "",
-                "课程名称": cols[1].xpath(".//a/text()")[0]
-                if cols[1].xpath(".//a/text()")
-                else "",
+                "课程名称": cols[1].xpath(".//a/text()")[0] if cols[1].xpath(".//a/text()") else "",
                 "课程名称链接": cols[1].xpath(".//a/@href")[0]
                 if cols[1].xpath(".//a/@href")
                 else "",
@@ -48,12 +44,8 @@ class XkgoService(BaseService):
                 "学分": cols[3].text.strip() if cols[3].text else "",
                 "学位课": cols[4].text.strip() if cols[4].text else "",
                 "考试方式": cols[5].text.strip() if cols[5].text else "",
-                "主讲教师": cols[6].xpath(".//a/text()")[0]
-                if cols[6].xpath(".//a/text()")
-                else "",
-                "教师链接": cols[6].xpath(".//a/@href")[0]
-                if cols[6].xpath(".//a/@href")
-                else "",
+                "主讲教师": cols[6].xpath(".//a/text()")[0] if cols[6].xpath(".//a/text()") else "",
+                "教师链接": cols[6].xpath(".//a/@href")[0] if cols[6].xpath(".//a/@href") else "",
                 "跨学期课程": cols[7].text.strip() if cols[7].text else "",
             }
             courses.append(course)
