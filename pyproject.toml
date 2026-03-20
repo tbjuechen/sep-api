@@ -1,26 +1,37 @@
 [project]
 name = "sep-api"
 version = "0.1.0"
-description = "国科大教务系统 API 中转站"
-authors = [{name = "Your Name", email = "your@email.com"}]
+description = "国科大教务系统 (SEP) 非官方 API 客户端"
+authors = [{name = "tbjuechen"}]
+license = "MIT"
 readme = "README.md"
 requires-python = ">=3.11"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
     "httpx",
-    "fastapi",
-    "uvicorn",
-    "click",
-    "python-dotenv",
-    "pydantic",
-    "loguru",
+    "lxml",
     "cryptography",
     "pillow",
-    "lxml",
-    "numpy",
-    "pytesseract",
+    "loguru",
+    "pydantic",
+    "click",
     "rich",
     "InquirerPy",
+    "python-dotenv",
 ]
+
+[project.optional-dependencies]
+api = ["fastapi", "uvicorn"]
+tesseract = ["pytesseract", "numpy"]
+all = ["sep-api[api]", "sep-api[tesseract]"]
+
+[project.urls]
+Repository = "https://github.com/tbjuechen/sep-api"
 
 [project.scripts]
 sep-api = "sep_api.cli:main"

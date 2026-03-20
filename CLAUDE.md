@@ -11,12 +11,13 @@ Language: Chinese (code comments, UI strings, data models use Chinese field name
 ## Commands
 
 ```bash
-# Setup
-conda env create -f environment.yml
-conda activate sep-api
+# Setup (full install with API server + Tesseract)
+pip install -e ".[all]"
+
+# Minimal install (CLI only)
 pip install -e .
 
-# Run API server
+# Run API server (requires [api] extra)
 sep-api serve
 uvicorn sep_api.api:app --reload
 
@@ -58,4 +59,4 @@ Auth goes through `sep.ucas.ac.cn` (HTTPS). Course operations (list, search, sel
 
 ## Requirements
 
-Python >= 3.11. Key deps: httpx, fastapi, uvicorn, click, pydantic, loguru, cryptography, pillow, lxml, pytesseract, rich, InquirerPy. Ruff configured with `line-length = 100`.
+Python >= 3.11. Core deps: httpx, lxml, cryptography, pillow, loguru, pydantic, click, rich, InquirerPy, python-dotenv. Optional: `[api]` adds fastapi + uvicorn; `[tesseract]` adds pytesseract + numpy; `[all]` includes both. Ruff configured with `line-length = 100`.

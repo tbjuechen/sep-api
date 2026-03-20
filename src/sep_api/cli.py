@@ -528,7 +528,10 @@ async def _cli_lectures(type_: str, json_output: bool) -> None:
 @click.option("--reload", "reload_", is_flag=True, default=False, help="热重载")
 def serve(host: str, port: int, reload_: bool) -> None:
     """启动 API 服务器"""
-    import uvicorn
+    try:
+        import uvicorn
+    except ImportError:
+        raise click.ClickException("API 依赖未安装，请运行: pip install sep-api[api]")
 
     uvicorn.run("sep_api.app:app", host=host, port=port, reload=reload_)
 

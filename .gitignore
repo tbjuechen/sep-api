@@ -44,6 +44,9 @@ logs/
 .DS_Store
 Thumbs.db
 
+# Build artifacts
+*.whl
+
 # 运行时生成
 .sep_session.json
 captcha.png
