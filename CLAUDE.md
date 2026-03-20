@@ -54,7 +54,7 @@ Auth goes through `sep.ucas.ac.cn` (HTTPS). Course operations (list, search, sel
 
 - All HTTP interactions use `httpx.AsyncClient` with browser-like headers and manual redirect handling (`follow_redirects=False` for login to detect two-factor redirects).
 - HTML responses are parsed with `lxml.etree.HTML()` + XPath expressions.
-- Captcha defaults to AntiCAP with automatic fallback to Tesseract on failure. Change by passing `method` to `CaptchaHandler` (`tesseract`, `anticap`, `chaojiying`).
+- Captcha defaults to AntiCAP (local ONNX model inference, no API key needed) with automatic fallback to Tesseract on failure. Change by passing `method` to `CaptchaHandler` (`tesseract`, `anticap`, `chaojiying`).
 - Session files (`.sep_session.json`, `captcha.png`) are gitignored runtime artifacts.
 
 ## Requirements

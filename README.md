@@ -124,12 +124,12 @@ asyncio.run(main())
 
 ## 验证码配置
 
-默认使用 [AntiCAP](https://www.jfbym.com/) 云识别，失败时自动降级到 Tesseract。
+默认使用 [AntiCAP](https://github.com/81NewArk/AntiCAP)（本地 ONNX 模型推理，无需联网或配置 API key），失败时自动降级到 Tesseract。
 
 通过环境变量切换：
 
 ```bash
-export CAPTCHA_METHOD=anticap     # AntiCAP（默认）
+export CAPTCHA_METHOD=anticap     # AntiCAP 本地模型（默认）
 export CAPTCHA_METHOD=tesseract   # Tesseract OCR（需要 sep-api[tesseract]）
 export CAPTCHA_METHOD=chaojiying  # 超级鹰
 ```
